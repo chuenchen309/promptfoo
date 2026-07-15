@@ -98,6 +98,22 @@ export function readProviderPromptMap(
 }
 
 /**
+ * Builds a glob-matched file's label, disambiguating a shared explicit
+ * `label` across multiple matches (mirroring csv.ts's `buildCsvRowLabel`
+ * pattern) so distinct files don't collapse onto the same label.
+ */
+function buildGlobLabel(
+  baseLabel: string | undefined,
+  globbedFilePath: string,
+  hasMultipleMatches: boolean,
+): string | undefined {
+  if (!baseLabel) {
+    return baseLabel;
+  }
+  return hasMultipleMatches ? `${baseLabel}: ${globbedFilePath}` : baseLabel;
+}
+
+/**
  * Processes a raw prompt based on its content type and path.
  * @param prompt - The raw prompt data.
  * @param basePath - Base path for file resolution.
@@ -150,10 +166,15 @@ async function processPrompt(
       `Expanded prompt ${prompt.raw} to ${filePath} and then to ${JSON.stringify(globbedPath)}`,
     );
     const prompts: Prompt[] = [];
+    const hasMultipleMatches = globbedPath.length > 1;
     for (const globbedFilePath of globbedPath) {
       const rawPath = functionName ? `${globbedFilePath}:${functionName}` : globbedFilePath;
       const processedPrompts = await processPrompt(
-        { raw: rawPath },
+        {
+          ...prompt,
+          raw: rawPath,
+          label: buildGlobLabel(prompt.label, globbedFilePath, hasMultipleMatches),
+        },
         basePath,
         maxRecursionDepth - 1,
       );

@@ -515,6 +515,50 @@ describe('readPrompts', () => {
     expect(fs.statSync).toHaveBeenCalledTimes(3);
   });
 
+  it('should propagate label and config through glob expansion for a single match', async () => {
+    vi.mocked(globSync).mockReturnValueOnce(['prompts/greeting.json']);
+    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => false } as fs.Stats);
+    const mockJsonContent = JSON.stringify([{ role: 'system', content: 'hi' }]);
+    vi.mocked(fs.readFileSync).mockReturnValue(mockJsonContent);
+
+    const result = await readPrompts([
+      { raw: 'prompts/*.json', label: 'My Greeting', config: { temperature: 0.7 } },
+    ]);
+
+    expect(result).toEqual([
+      {
+        raw: mockJsonContent,
+        label: 'My Greeting',
+        config: { temperature: 0.7 },
+      },
+    ]);
+  });
+
+  it('should disambiguate a shared label across multiple glob matches instead of colliding', async () => {
+    vi.mocked(globSync).mockReturnValueOnce(['prompts/a.json', 'prompts/b.json']);
+    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => false } as fs.Stats);
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      if (filePath.toString().endsWith('a.json')) {
+        return JSON.stringify([{ role: 'system', content: 'a' }]);
+      } else if (filePath.toString().endsWith('b.json')) {
+        return JSON.stringify([{ role: 'system', content: 'b' }]);
+      }
+      throw new Error(`Unexpected file path in test: ${filePath}`);
+    });
+
+    const result = await readPrompts([
+      { raw: 'prompts/*.json', label: 'My Greeting', config: { temperature: 0.7 } },
+    ]);
+
+    expect(result).toHaveLength(2);
+    const labels = result.map((r) => r.label);
+    // Distinct glob-matched files must not collapse onto the same label.
+    expect(new Set(labels).size).toBe(2);
+    expect(labels).toEqual(['My Greeting: prompts/a.json', 'My Greeting: prompts/b.json']);
+    // config must still be carried through to every matched file.
+    expect(result.every((r) => r.config?.temperature === 0.7)).toBe(true);
+  });
+
   it('should fall back to a string if maybeFilePath is true but a file does not exist', async () => {
     vi.mocked(globSync).mockReturnValueOnce([]);
     vi.mocked(maybeFilePath).mockReturnValueOnce(true);
